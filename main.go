@@ -27,11 +27,11 @@ func env(key, def string) string {
 }
 
 func init() {
-	flag.StringVar(&listen, "listen", env("ESX_LISTEN", listen), "listen port")
-	flag.StringVar(&host, "host", env("ESX_HOST", host), "URL ESX host ")
-	flag.StringVar(&username, "username", env("ESX_USERNAME", username), "User for ESX")
-	flag.StringVar(&password, "password", env("ESX_PASSWORD", password), "password for ESX")
-	flag.StringVar(&logLevel, "log", env("ESX_LOG", logLevel), "Log level must be, debug or info")
+	flag.StringVar(&listen, "listen", env("VSPHERE_LISTEN", listen), "listen port")
+	flag.StringVar(&host, "host", env("VSPHERE_HOST", host), "URL VSPHERE host ")
+	flag.StringVar(&username, "username", env("VSPHERE_USERNAME", username), "User for VSPHERE")
+	flag.StringVar(&password, "password", env("VSPHERE_PASSWORD", password), "password for VSPHERE")
+	flag.StringVar(&logLevel, "log", env("LOG_LEVEL", logLevel), "Log level must be, debug or info")
 	flag.Parse()
 	controller.RegistredMetrics()
 	collectMetrics()
@@ -84,13 +84,13 @@ func main() {
 		logger.Fatal(err)
 	}
 	if host == "" {
-		logger.Fatal("Yor must configured systemm env ESX_HOST or key -host")
+		logger.Fatal("Yor must configured systemm env VSPHERE_HOST or key -host")
 	}
 	if username == "" {
-		logger.Fatal("Yor must configured system env ESX_USERNAME or key -username")
+		logger.Fatal("Yor must configured system env VSPHERE_USERNAME or key -username")
 	}
 	if password == "" {
-		logger.Fatal("Yor must configured system env ESX_PASSWORD or key -password")
+		logger.Fatal("Yor must configured system env VSPHERE_PASSWORD or key -password")
 	}
 	msg := fmt.Sprintf("Exporter start on port %s", listen)
 	logger.Info(msg)
