@@ -1,5 +1,5 @@
 # prometheus-vmware-exporter
-Collect metrics ESXi Host
+Collect VMWare metrics from a vSphere host
 
 ## Build
 ```sh 
@@ -8,12 +8,12 @@ docker build -t prometheus-vmware-exporter .
 
 ## Run
 ```sh
-docker run -b \
+docker run -d \
   --restart=always \
   --name=prometheus-vmware-exporter \
-  --env=ESX_HOST esx.domain.local \
-  --env=ESX_USERNAME user \
-  --env=ESX_PASSWORD password \
-  --env=ESX_LOG debug \
+  --env=VSPHERE_HOST vsphere.domain.local \
+  --env=VSPHERE_USERNAME user \
+  --env=VSPHERE_PASSWORD password \
+  --env=LOG_LEVEL debug \
   prometheus-vmware-exporter 
 ```
