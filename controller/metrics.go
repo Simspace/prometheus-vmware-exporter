@@ -7,7 +7,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/vmware/govmomi/view"
 	"github.com/vmware/govmomi/vim25/mo"
-	"github.com/vmware/govmomi/vim25/types"
 )
 
 const namespace = "vmware"
@@ -88,7 +87,7 @@ var (
 	prometheusVmMemAval = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Subsystem: "vm",
-		Name:      "mem_avaleble",
+		Name:      "mem_available",
 		Help:      "Available memory",
 	}, []string{"vm_name", "host_name"})
 	prometheusVmMemUsage = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -102,6 +101,18 @@ var (
 		Subsystem: "vm",
 		Name:      "net_rec",
 		Help:      "Usage memory",
+	}, []string{"vm_name", "host_name"})
+	prometheusVmPowerState = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: "vm",
+		Name:      "power_state",
+		Help:      "poweredOn 1, poweredOff 2, standBy 3, other 0",
+	}, []string{"vm_name", "host_name"})
+	prometheusVmSwapUsage = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: "vm",
+		Name:      "mem_swapped_average",
+		Help:      "Average VM swap usage",
 	}, []string{"vm_name", "host_name"})
 )
 
@@ -117,14 +128,13 @@ func convertTime(vm mo.VirtualMachine) float64 {
 	return float64(vm.Summary.Runtime.BootTime.Unix())
 }
 
-func powerState(s types.HostSystemPowerState) float64 {
-	if s == "poweredOn" {
+func powerState(s interface{}) float64 {
+	switch s {
+	case "powerdOn":
 		return 1
-	}
-	if s == "poweredOff" {
+	case "poweredOff":
 		return 2
-	}
-	if s == "standBy" {
+	case "standBy":
 		return 3
 	}
 	return 0
@@ -146,7 +156,10 @@ func RegistredMetrics() {
 		prometheusVmMemAval,
 		prometheusVmMemUsage,
 		prometheusVmCpuUsage,
-		prometheusVmNetRec)
+		prometheusVmNetRec,
+		prometheusVmPowerState,
+		prometheusVmSwapUsage,
+	)
 }
 
 func NewVmwareHostMetrics(host string, username string, password string, logger *log.Logger) {
@@ -229,5 +242,7 @@ func NewVmwareVmMetrics(host string, username string, password string, logger *l
 		prometheusVmNumCpu.WithLabelValues(vmname, host).Set(float64(vm.Summary.Config.NumCpu))
 		prometheusVmMemAval.WithLabelValues(vmname, host).Set(float64(vm.Summary.Config.MemorySizeMB))
 		prometheusVmMemUsage.WithLabelValues(vmname, host).Set(float64(vm.Summary.QuickStats.GuestMemoryUsage) * 1024 * 1024)
+		prometheusVmPowerState.WithLabelValues(vmname, host).Set(float64(powerState(vm.Summary.Runtime.PowerState)))
+		prometheusVmSwapUsage.WithLabelValues(vmname, host).Set(float64(vm.Summary.QuickStats.SwappedMemory))
 	}
 }
