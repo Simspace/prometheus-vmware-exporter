@@ -3,11 +3,15 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
+	"github.com/vmware/govmomi/performance"
+
 	"github.com/vmware/govmomi/view"
 	"github.com/vmware/govmomi/vim25/mo"
+	"github.com/vmware/govmomi/vim25/types"
 )
 
 const namespace = "vmware"
@@ -115,6 +119,12 @@ var (
 		Name:      "mem_swapped_average",
 		Help:      "Average VM swap usage",
 	}, []string{"vm_name", "host_name"})
+	prometheusVmMaxDiskLatency = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: "vm",
+		Name:      "disk_maxTotalLatency_latest",
+		Help:      "Max VM disk latency",
+	}, []string{"vm_name", "host_name"})
 )
 
 func totalCpu(hs mo.HostSystem) float64 {
@@ -160,6 +170,7 @@ func RegistredMetrics() {
 		prometheusVmNetRec,
 		prometheusVmPowerState,
 		prometheusVmSwapUsage,
+		prometheusVmMaxDiskLatency,
 	)
 }
 
@@ -182,12 +193,13 @@ func NewVmwareHostMetrics(host string, username string, password string, logger 
 		logger.Fatal(err)
 	}
 	for _, hs := range hss {
-		prometheusHostPowerState.WithLabelValues(hs.Summary.Config.Name).Set(powerState(hs.Summary.Runtime.PowerState))
-		prometheusHostBoot.WithLabelValues(hs.Summary.Config.Name).Set(float64(hs.Summary.Runtime.BootTime.Unix()))
-		prometheusTotalCpu.WithLabelValues(hs.Summary.Config.Name).Set(totalCpu(hs))
-		prometheusUsageCpu.WithLabelValues(hs.Summary.Config.Name).Set(float64(hs.Summary.QuickStats.OverallCpuUsage))
-		prometheusTotalMem.WithLabelValues(hs.Summary.Config.Name).Set(float64(hs.Summary.Hardware.MemorySize))
-		prometheusUsageMem.WithLabelValues(hs.Summary.Config.Name).Set(float64(hs.Summary.QuickStats.OverallMemoryUsage) * 1024 * 1024)
+		hsname := hs.Summary.Config.Name
+		prometheusHostPowerState.WithLabelValues(hsname).Set(powerState(hs.Summary.Runtime.PowerState))
+		prometheusHostBoot.WithLabelValues(hsname).Set(float64(hs.Summary.Runtime.BootTime.Unix()))
+		prometheusTotalCpu.WithLabelValues(hsname).Set(totalCpu(hs))
+		prometheusUsageCpu.WithLabelValues(hsname).Set(float64(hs.Summary.QuickStats.OverallCpuUsage))
+		prometheusTotalMem.WithLabelValues(hsname).Set(float64(hs.Summary.Hardware.MemorySize))
+		prometheusUsageMem.WithLabelValues(hsname).Set(float64(hs.Summary.QuickStats.OverallMemoryUsage) * 1024 * 1024)
 
 	}
 }
@@ -245,5 +257,60 @@ func NewVmwareVmMetrics(host string, username string, password string, logger *l
 		prometheusVmMemUsage.WithLabelValues(vmname, host).Set(float64(vm.Summary.QuickStats.GuestMemoryUsage) * 1024 * 1024)
 		prometheusVmPowerState.WithLabelValues(vmname, host).Set(float64(powerState(vm.Summary.Runtime.PowerState)))
 		prometheusVmSwapUsage.WithLabelValues(vmname, host).Set(float64(vm.Summary.QuickStats.SwappedMemory))
+	}
+}
+
+// Retrieve performance metrics for VMs via a PerfManager object
+func NewVmwareVmPerfMetrics(host string, username string, password string, logger *log.Logger) {
+	ctx := context.Background()
+	c, err := NewClient(ctx, host, username, password)
+	if err != nil {
+		logger.Fatal(err)
+	}
+	defer c.Logout(ctx)
+	m := view.NewManager(c.Client)
+	v, err := m.CreateContainerView(ctx, c.ServiceContent.RootFolder, nil, true)
+	if err != nil {
+		logger.Fatal(err)
+	}
+
+	defer v.Destroy(ctx)
+	vmsRefs, err := v.Find(ctx, []string{"VirtualMachine"}, nil)
+	if err != nil {
+		logger.Fatal(err)
+	}
+
+	// Create a PerfManager
+	perfManager := performance.NewManager(c.Client)
+
+	// Create PerfQuerySpec
+	spec := types.PerfQuerySpec{
+		MaxSample:  1,
+		MetricId:   []types.PerfMetricId{{Instance: "*"}},
+		IntervalId: int32(20),
+	}
+
+	// Query metrics
+	sample, err := perfManager.SampleByName(ctx, spec, []string{"disk.maxTotalLatency.latest"}, vmsRefs)
+	if err != nil {
+		logger.Fatal(err)
+	}
+
+	result, err := perfManager.ToMetricSeries(ctx, sample)
+	if err != nil {
+		logger.Fatal(err)
+	}
+
+	// Read result
+	for _, metric := range result {
+		// metricnames are formatted like "VirtualMachine:name" and we just
+		// want name
+		name := strings.Split(metric.Entity.String(), ":")[1]
+
+		for _, v := range metric.Value {
+			if len(v.Value) != 0 {
+				prometheusVmMaxDiskLatency.WithLabelValues(name, host).Set(float64(v.Value[0]))
+			}
+		}
 	}
 }
