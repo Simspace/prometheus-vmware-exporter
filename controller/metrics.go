@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
@@ -129,8 +130,8 @@ func convertTime(vm mo.VirtualMachine) float64 {
 }
 
 func powerState(s interface{}) float64 {
-	switch s {
-	case "powerdOn":
+	switch fmt.Sprintf("%s", s) {
+	case "poweredOn":
 		return 1
 	case "poweredOff":
 		return 2
