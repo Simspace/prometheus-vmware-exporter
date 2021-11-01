@@ -64,6 +64,12 @@ var (
 		Name:      "freespace_size",
 		Help:      "Datastore free",
 	}, []string{"ds_name", "host_name"})
+	prometheusProvisionedDs = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: "datastore",
+		Name:      "provisioned_size",
+		Help:      "Datastore provisioned",
+	}, []string{"ds_name", "host_name"})
 	prometheusVmBoot = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Subsystem: "vm",
@@ -150,6 +156,11 @@ func powerState(s interface{}) float64 {
 	return 0
 }
 
+func dsProvisionedSize(ds mo.Datastore) float64 {
+	ps := ds.Summary.Capacity - ds.Summary.FreeSpace + ds.Summary.Uncommitted
+	return float64(ps)
+}
+
 func RegistredMetrics() {
 	prometheus.MustRegister(
 		prometheusHostPowerState,
@@ -160,6 +171,7 @@ func RegistredMetrics() {
 		prometheusUsageMem,
 		prometheusTotalDs,
 		prometheusUsageDs,
+		prometheusProvisionedDs,
 		prometheusVmBoot,
 		prometheusVmCpuAval,
 		prometheusVmNumCpu,
@@ -225,6 +237,7 @@ func NewVmwareDsMetrics(host string, username string, password string, logger *l
 		dsname := ds.Summary.Name
 		prometheusTotalDs.WithLabelValues(dsname, host).Set(float64(ds.Summary.Capacity))
 		prometheusUsageDs.WithLabelValues(dsname, host).Set(float64(ds.Summary.FreeSpace))
+		prometheusProvisionedDs.WithLabelValues(dsname, host).Set(dsProvisionedSize(ds))
 	}
 }
 
