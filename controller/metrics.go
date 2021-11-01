@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
@@ -237,7 +236,7 @@ func NewVmwareVmMetrics(host string, username string, password string, logger *l
 	}
 	defer c.Logout(ctx)
 	m := view.NewManager(c.Client)
-	v, err := m.CreateContainerView(ctx, c.ServiceContent.RootFolder, []string{"VirtualMachine"}, true)
+	v, err := m.CreateContainerView(ctx, c.ServiceContent.RootFolder, []string{"HostSystem", "VirtualMachine"}, true)
 	if err != nil {
 		logger.Fatal(err)
 	}
@@ -247,16 +246,33 @@ func NewVmwareVmMetrics(host string, username string, password string, logger *l
 	if err != nil {
 		logger.Fatal(err)
 	}
+	var hss []mo.HostSystem
+	err = v.Retrieve(ctx, []string{"HostSystem"}, []string{"summary"}, &hss)
+	if err != nil {
+		logger.Fatal(err)
+	}
 	for _, vm := range vms {
 		vmname := vm.Summary.Config.Name
-		prometheusVmBoot.WithLabelValues(vmname, host).Set(convertTime(vm))
-		prometheusVmCpuAval.WithLabelValues(vmname, host).Set(float64(vm.Summary.Runtime.MaxCpuUsage) * 1000 * 1000)
-		prometheusVmCpuUsage.WithLabelValues(vmname, host).Set(float64(vm.Summary.QuickStats.OverallCpuUsage) * 1000 * 1000)
-		prometheusVmNumCpu.WithLabelValues(vmname, host).Set(float64(vm.Summary.Config.NumCpu))
-		prometheusVmMemAval.WithLabelValues(vmname, host).Set(float64(vm.Summary.Config.MemorySizeMB))
-		prometheusVmMemUsage.WithLabelValues(vmname, host).Set(float64(vm.Summary.QuickStats.GuestMemoryUsage) * 1024 * 1024)
-		prometheusVmPowerState.WithLabelValues(vmname, host).Set(float64(powerState(vm.Summary.Runtime.PowerState)))
-		prometheusVmSwapUsage.WithLabelValues(vmname, host).Set(float64(vm.Summary.QuickStats.SwappedMemory))
+		vmhostRef := vm.Summary.Runtime.Host.Reference()
+
+		// get human readable name of the hostsystem the vm is on
+		// from the actual object referenced by hostRef
+		var vmhost string
+		for _, host := range hss {
+			if vmhostRef.Value == host.Summary.Host.Value {
+				vmhost = host.Summary.Config.Name
+			}
+		}
+
+		logger.Debugf("VM: %s -- %s", vmname, vmhost)
+		prometheusVmBoot.WithLabelValues(vmname, vmhost).Set(convertTime(vm))
+		prometheusVmCpuAval.WithLabelValues(vmname, vmhost).Set(float64(vm.Summary.Runtime.MaxCpuUsage) * 1000 * 1000)
+		prometheusVmCpuUsage.WithLabelValues(vmname, vmhost).Set(float64(vm.Summary.QuickStats.OverallCpuUsage) * 1000 * 1000)
+		prometheusVmNumCpu.WithLabelValues(vmname, vmhost).Set(float64(vm.Summary.Config.NumCpu))
+		prometheusVmMemAval.WithLabelValues(vmname, vmhost).Set(float64(vm.Summary.Config.MemorySizeMB))
+		prometheusVmMemUsage.WithLabelValues(vmname, vmhost).Set(float64(vm.Summary.QuickStats.GuestMemoryUsage) * 1024 * 1024)
+		prometheusVmPowerState.WithLabelValues(vmname, vmhost).Set(float64(powerState(vm.Summary.Runtime.PowerState)))
+		prometheusVmSwapUsage.WithLabelValues(vmname, vmhost).Set(float64(vm.Summary.QuickStats.SwappedMemory))
 	}
 }
 
@@ -269,13 +285,18 @@ func NewVmwareVmPerfMetrics(host string, username string, password string, logge
 	}
 	defer c.Logout(ctx)
 	m := view.NewManager(c.Client)
-	v, err := m.CreateContainerView(ctx, c.ServiceContent.RootFolder, nil, true)
+	v, err := m.CreateContainerView(ctx, c.ServiceContent.RootFolder, []string{"VirtualMachine"}, true)
 	if err != nil {
 		logger.Fatal(err)
 	}
 
 	defer v.Destroy(ctx)
 	vmsRefs, err := v.Find(ctx, []string{"VirtualMachine"}, nil)
+	if err != nil {
+		logger.Fatal(err)
+	}
+	var vms []mo.VirtualMachine
+	err = v.Retrieve(ctx, []string{"VirtualMachine"}, []string{"summary"}, &vms)
 	if err != nil {
 		logger.Fatal(err)
 	}
@@ -303,9 +324,13 @@ func NewVmwareVmPerfMetrics(host string, username string, password string, logge
 
 	// Read result
 	for _, metric := range result {
-		// metricnames are formatted like "VirtualMachine:name" and we just
-		// want name
-		name := strings.Split(metric.Entity.String(), ":")[1]
+		// Get the human readable vm name from the object referenced by vmRef
+		var name string
+		for _, vm := range vms {
+			if metric.Entity.Value == vm.Summary.Vm.Value {
+				name = vm.Summary.Config.Name
+			}
+		}
 
 		for _, v := range metric.Value {
 			if len(v.Value) != 0 {
