@@ -40,6 +40,12 @@ var (
 		Name:      "cpu_usage",
 		Help:      "CPU Usage",
 	}, []string{"host_name"})
+	prometheusHostCPUCores = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: "host",
+		Name:      "num_cpu",
+		Help:      "The number of CPU cores per host",
+	}, []string{"host_name"})
 	prometheusTotalMem = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Subsystem: "host",
@@ -165,6 +171,7 @@ func RegistredMetrics() {
 	prometheus.MustRegister(
 		prometheusHostPowerState,
 		prometheusHostBoot,
+		prometheusHostCPUCores,
 		prometheusTotalCpu,
 		prometheusUsageCpu,
 		prometheusTotalMem,
@@ -207,11 +214,11 @@ func NewVmwareHostMetrics(host string, username string, password string, logger 
 		hsname := hs.Summary.Config.Name
 		prometheusHostPowerState.WithLabelValues(hsname).Set(powerState(hs.Summary.Runtime.PowerState))
 		prometheusHostBoot.WithLabelValues(hsname).Set(float64(hs.Summary.Runtime.BootTime.Unix()))
+		prometheusHostCPUCores.WithLabelValues(hsname).Set(float64(hs.Summary.Hardware.NumCpuCores))
 		prometheusTotalCpu.WithLabelValues(hsname).Set(totalCpu(hs))
 		prometheusUsageCpu.WithLabelValues(hsname).Set(float64(hs.Summary.QuickStats.OverallCpuUsage))
 		prometheusTotalMem.WithLabelValues(hsname).Set(float64(hs.Summary.Hardware.MemorySize))
 		prometheusUsageMem.WithLabelValues(hsname).Set(float64(hs.Summary.QuickStats.OverallMemoryUsage) * 1024 * 1024)
-
 	}
 }
 
