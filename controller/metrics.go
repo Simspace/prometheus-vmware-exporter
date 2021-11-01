@@ -266,13 +266,12 @@ func NewVmwareVmMetrics(host string, username string, password string, logger *l
 	}
 	for _, vm := range vms {
 		vmname := vm.Summary.Config.Name
-		vmhostRef := vm.Summary.Runtime.Host.Reference()
 
 		// get human readable name of the hostsystem the vm is on
 		// from the actual object referenced by hostRef
 		var vmhost string
 		for _, host := range hss {
-			if vmhostRef.Value == host.Summary.Host.Value {
+			if vm.Summary.Runtime.Host.Value == host.Summary.Host.Value {
 				vmhost = host.Summary.Config.Name
 			}
 		}
@@ -298,7 +297,7 @@ func NewVmwareVmPerfMetrics(host string, username string, password string, logge
 	}
 	defer c.Logout(ctx)
 	m := view.NewManager(c.Client)
-	v, err := m.CreateContainerView(ctx, c.ServiceContent.RootFolder, []string{"VirtualMachine"}, true)
+	v, err := m.CreateContainerView(ctx, c.ServiceContent.RootFolder, []string{"HostSystem", "VirtualMachine"}, true)
 	if err != nil {
 		logger.Fatal(err)
 	}
@@ -310,6 +309,11 @@ func NewVmwareVmPerfMetrics(host string, username string, password string, logge
 	}
 	var vms []mo.VirtualMachine
 	err = v.Retrieve(ctx, []string{"VirtualMachine"}, []string{"summary"}, &vms)
+	if err != nil {
+		logger.Fatal(err)
+	}
+	var hss []mo.HostSystem
+	err = v.Retrieve(ctx, []string{"HostSystem"}, []string{"summary"}, &hss)
 	if err != nil {
 		logger.Fatal(err)
 	}
@@ -339,15 +343,21 @@ func NewVmwareVmPerfMetrics(host string, username string, password string, logge
 	for _, metric := range result {
 		// Get the human readable vm name from the object referenced by vmRef
 		var name string
+		var vmhost string
 		for _, vm := range vms {
 			if metric.Entity.Value == vm.Summary.Vm.Value {
 				name = vm.Summary.Config.Name
+				for _, host := range hss {
+					if vm.Summary.Runtime.Host.Value == host.Summary.Host.Value {
+						vmhost = host.Summary.Config.Name
+					}
+				}
 			}
 		}
 
 		for _, v := range metric.Value {
 			if len(v.Value) != 0 {
-				prometheusVmMaxDiskLatency.WithLabelValues(name, host).Set(float64(v.Value[0]))
+				prometheusVmMaxDiskLatency.WithLabelValues(name, vmhost).Set(float64(v.Value[0]))
 			}
 		}
 	}
