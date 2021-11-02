@@ -7,7 +7,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"github.com/vmware/govmomi/performance"
-
 	"github.com/vmware/govmomi/view"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"
@@ -133,7 +132,7 @@ var (
 	prometheusVmMaxDiskLatency = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Subsystem: "vm",
-		Name:      "disk_maxTotalLatency_latest",
+		Name:      "disk_max_total_latency_latest",
 		Help:      "Max VM disk latency",
 	}, []string{"vm_name", "host_name"})
 )
@@ -151,6 +150,12 @@ func convertTime(vm mo.VirtualMachine) float64 {
 }
 
 func powerState(s interface{}) float64 {
+	// typecheck the interface to ensure we can cast to string
+	if _, ok := s.(types.HostSystemPowerState); !ok {
+		if _, ok := s.(types.VirtualMachinePowerState); !ok {
+			panic("powerState supplied is not a string")
+		}
+	}
 	switch fmt.Sprintf("%s", s) {
 	case "poweredOn":
 		return 1
