@@ -149,14 +149,28 @@ func convertTime(vm mo.VirtualMachine) float64 {
 	return float64(vm.Summary.Runtime.BootTime.Unix())
 }
 
-func powerState(s interface{}) float64 {
-	// typecheck the interface to ensure we can cast to string
-	if _, ok := s.(types.HostSystemPowerState); !ok {
-		if _, ok := s.(types.VirtualMachinePowerState); !ok {
-			panic("powerState supplied is not a string")
-		}
-	}
-	switch fmt.Sprintf("%s", s) {
+type powerState interface {
+	String() string
+}
+
+type HostSystemPowerState struct {
+	*types.HostSystemPowerState
+}
+
+func (ps *HostSystemPowerState) String() string {
+	return fmt.Sprintf("%s", *ps.HostSystemPowerState)
+}
+
+type VirtualMachinePowerState struct {
+	*types.VirtualMachinePowerState
+}
+
+func (ps *VirtualMachinePowerState) String() string {
+	return fmt.Sprintf("%s", *ps.VirtualMachinePowerState)
+}
+
+func getPowerState(p powerState) float64 {
+	switch p.String() {
 	case "poweredOn":
 		return 1
 	case "poweredOff":
@@ -217,7 +231,8 @@ func NewVmwareHostMetrics(host string, username string, password string, logger 
 	}
 	for _, hs := range hss {
 		hsname := hs.Summary.Config.Name
-		prometheusHostPowerState.WithLabelValues(hsname).Set(powerState(hs.Summary.Runtime.PowerState))
+		ps := HostSystemPowerState{&hs.Summary.Runtime.PowerState}
+		prometheusHostPowerState.WithLabelValues(hsname).Set(getPowerState(&ps))
 		prometheusHostBoot.WithLabelValues(hsname).Set(float64(hs.Summary.Runtime.BootTime.Unix()))
 		prometheusHostCPUCores.WithLabelValues(hsname).Set(float64(hs.Summary.Hardware.NumCpuCores))
 		prometheusTotalCpu.WithLabelValues(hsname).Set(totalCpu(hs))
@@ -288,6 +303,8 @@ func NewVmwareVmMetrics(host string, username string, password string, logger *l
 			}
 		}
 
+		ps := VirtualMachinePowerState{&vm.Summary.Runtime.PowerState}
+
 		logger.Debugf("VM: %s -- %s", vmname, vmhost)
 		prometheusVmBoot.WithLabelValues(vmname, vmhost).Set(convertTime(vm))
 		prometheusVmCpuAval.WithLabelValues(vmname, vmhost).Set(float64(vm.Summary.Runtime.MaxCpuUsage) * 1000 * 1000)
@@ -295,7 +312,7 @@ func NewVmwareVmMetrics(host string, username string, password string, logger *l
 		prometheusVmNumCpu.WithLabelValues(vmname, vmhost).Set(float64(vm.Summary.Config.NumCpu))
 		prometheusVmMemAval.WithLabelValues(vmname, vmhost).Set(float64(vm.Summary.Config.MemorySizeMB))
 		prometheusVmMemUsage.WithLabelValues(vmname, vmhost).Set(float64(vm.Summary.QuickStats.GuestMemoryUsage) * 1024 * 1024)
-		prometheusVmPowerState.WithLabelValues(vmname, vmhost).Set(float64(powerState(vm.Summary.Runtime.PowerState)))
+		prometheusVmPowerState.WithLabelValues(vmname, vmhost).Set(float64(getPowerState(&ps)))
 		prometheusVmSwapUsage.WithLabelValues(vmname, vmhost).Set(float64(vm.Summary.QuickStats.SwappedMemory))
 	}
 }
