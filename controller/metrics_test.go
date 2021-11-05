@@ -8,7 +8,6 @@ import (
 )
 
 var (
-	listen   = ":9879"
 	host     = os.Getenv("VSPHERE_HOST")
 	username = os.Getenv("VSPHERE_USERNAME")
 	password = os.Getenv("VSPHERE_PASSWORD")
@@ -56,16 +55,5 @@ func BenchmarkNewVmwareVmMetrics(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		NewVmwareVmMetrics(host, username, password, logger)
-	}
-}
-
-func BenchmarkNewVmwareVmPerfMetrics(b *testing.B) {
-	logger, err := initLogger()
-	if err != nil {
-		panic("Could not set logger for testing")
-	}
-
-	for i := 0; i < b.N; i++ {
-		NewVmwareVmPerfMetrics(host, username, password, logger)
 	}
 }
