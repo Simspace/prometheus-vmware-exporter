@@ -6,6 +6,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
+	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/performance"
 	"github.com/vmware/govmomi/view"
 	"github.com/vmware/govmomi/vim25/mo"
@@ -268,6 +269,60 @@ func NewVmwareDsMetrics(host string, username string, password string, logger *l
 	}
 }
 
+// Retrieve performance metrics for VMs via a PerfManager object
+func getVmwareVmPerfMetrics(ctx context.Context, c *govmomi.Client, v *view.ContainerView, vms []mo.VirtualMachine, hss []mo.HostSystem) error {
+	vmsRefs, err := v.Find(ctx, []string{"VirtualMachine"}, nil)
+	if err != nil {
+		return err
+	}
+
+	// Create a PerfManager
+	perfManager := performance.NewManager(c.Client)
+
+	// Create PerfQuerySpec
+	spec := types.PerfQuerySpec{
+		MaxSample:  1,
+		MetricId:   []types.PerfMetricId{{Instance: "*"}},
+		IntervalId: int32(20),
+	}
+
+	// Query metrics
+	sample, err := perfManager.SampleByName(ctx, spec, []string{"disk.maxTotalLatency.latest"}, vmsRefs)
+	if err != nil {
+		return err
+	}
+
+	result, err := perfManager.ToMetricSeries(ctx, sample)
+	if err != nil {
+		return err
+	}
+
+	// Read result
+	for _, metric := range result {
+		// Get the human readable vm name from the object referenced by vmRef
+		var name string
+		var vmhost string
+		for _, vm := range vms {
+			if metric.Entity.Value == vm.Summary.Vm.Value {
+				name = vm.Summary.Config.Name
+				for _, host := range hss {
+					if vm.Summary.Runtime.Host.Value == host.Summary.Host.Value {
+						vmhost = host.Summary.Config.Name
+					}
+				}
+			}
+		}
+
+		for _, v := range metric.Value {
+			if len(v.Value) != 0 {
+				prometheusVmMaxDiskLatency.WithLabelValues(name, vmhost).Set(float64(v.Value[0]))
+			}
+		}
+	}
+
+	return nil
+}
+
 func NewVmwareVmMetrics(host string, username string, password string, logger *log.Logger) {
 	ctx := context.Background()
 	c, err := NewClient(ctx, host, username, password)
@@ -291,6 +346,8 @@ func NewVmwareVmMetrics(host string, username string, password string, logger *l
 	if err != nil {
 		logger.Fatal(err)
 	}
+
+	// Get VM metrics
 	for _, vm := range vms {
 		vmname := vm.Summary.Config.Name
 
@@ -315,79 +372,10 @@ func NewVmwareVmMetrics(host string, username string, password string, logger *l
 		prometheusVmPowerState.WithLabelValues(vmname, vmhost).Set(float64(getPowerState(&ps)))
 		prometheusVmSwapUsage.WithLabelValues(vmname, vmhost).Set(float64(vm.Summary.QuickStats.SwappedMemory))
 	}
-}
 
-// Retrieve performance metrics for VMs via a PerfManager object
-func NewVmwareVmPerfMetrics(host string, username string, password string, logger *log.Logger) {
-	ctx := context.Background()
-	c, err := NewClient(ctx, host, username, password)
+	// Get VM performance metrics
+	err = getVmwareVmPerfMetrics(ctx, c, v, vms, hss)
 	if err != nil {
 		logger.Fatal(err)
-	}
-	defer c.Logout(ctx)
-	m := view.NewManager(c.Client)
-	v, err := m.CreateContainerView(ctx, c.ServiceContent.RootFolder, []string{"HostSystem", "VirtualMachine"}, true)
-	if err != nil {
-		logger.Fatal(err)
-	}
-
-	defer v.Destroy(ctx)
-	vmsRefs, err := v.Find(ctx, []string{"VirtualMachine"}, nil)
-	if err != nil {
-		logger.Fatal(err)
-	}
-	var vms []mo.VirtualMachine
-	err = v.Retrieve(ctx, []string{"VirtualMachine"}, []string{"summary"}, &vms)
-	if err != nil {
-		logger.Fatal(err)
-	}
-	var hss []mo.HostSystem
-	err = v.Retrieve(ctx, []string{"HostSystem"}, []string{"summary"}, &hss)
-	if err != nil {
-		logger.Fatal(err)
-	}
-
-	// Create a PerfManager
-	perfManager := performance.NewManager(c.Client)
-
-	// Create PerfQuerySpec
-	spec := types.PerfQuerySpec{
-		MaxSample:  1,
-		MetricId:   []types.PerfMetricId{{Instance: "*"}},
-		IntervalId: int32(20),
-	}
-
-	// Query metrics
-	sample, err := perfManager.SampleByName(ctx, spec, []string{"disk.maxTotalLatency.latest"}, vmsRefs)
-	if err != nil {
-		logger.Fatal(err)
-	}
-
-	result, err := perfManager.ToMetricSeries(ctx, sample)
-	if err != nil {
-		logger.Fatal(err)
-	}
-
-	// Read result
-	for _, metric := range result {
-		// Get the human readable vm name from the object referenced by vmRef
-		var name string
-		var vmhost string
-		for _, vm := range vms {
-			if metric.Entity.Value == vm.Summary.Vm.Value {
-				name = vm.Summary.Config.Name
-				for _, host := range hss {
-					if vm.Summary.Runtime.Host.Value == host.Summary.Host.Value {
-						vmhost = host.Summary.Config.Name
-					}
-				}
-			}
-		}
-
-		for _, v := range metric.Value {
-			if len(v.Value) != 0 {
-				prometheusVmMaxDiskLatency.WithLabelValues(name, vmhost).Set(float64(v.Value[0]))
-			}
-		}
 	}
 }
