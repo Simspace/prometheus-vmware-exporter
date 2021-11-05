@@ -57,11 +57,6 @@ func collectMetrics() {
 		controller.NewVmwareVmMetrics(host, username, password, logger)
 		logger.Debugf("End collect VM metrics")
 	}()
-	go func() {
-		logger.Debugf("Start collect VM Perf metrics")
-		controller.NewVmwareVmPerfMetrics(host, username, password, logger)
-		logger.Debugf("End collect VM Perf metrics")
-	}()
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
