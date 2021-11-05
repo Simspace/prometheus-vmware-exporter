@@ -28,7 +28,7 @@ func initLogger() (*log.Logger, error) {
 func BenchmarkNewVmwareHostMetrics(b *testing.B) {
 	logger, err := initLogger()
 	if err != nil {
-		panic("Could not set logger for testing")
+		b.Fatalf("Could not set logger for testing: %v", err)
 	}
 
 	for i := 0; i < b.N; i++ {
@@ -39,7 +39,7 @@ func BenchmarkNewVmwareHostMetrics(b *testing.B) {
 func BenchmarkNewVmwareDsMetrics(b *testing.B) {
 	logger, err := initLogger()
 	if err != nil {
-		panic("Could not set logger for testing")
+		b.Fatalf("Could not set logger for testing: %v", err)
 	}
 
 	for i := 0; i < b.N; i++ {
@@ -50,7 +50,7 @@ func BenchmarkNewVmwareDsMetrics(b *testing.B) {
 func BenchmarkNewVmwareVmMetrics(b *testing.B) {
 	logger, err := initLogger()
 	if err != nil {
-		panic("Could not set logger for testing")
+		b.Fatalf("Could not set logger for testing: %v", err)
 	}
 
 	for i := 0; i < b.N; i++ {
