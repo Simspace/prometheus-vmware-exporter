@@ -187,6 +187,16 @@ func dsProvisionedSize(ds mo.Datastore) float64 {
 	return float64(ps)
 }
 
+// Many types returned by the VMWare API contain embedded
+// ManagedObjectReference pointers. We have to handle getting the values
+// without causing panics if the embedded pointer is nil.
+func lookupRefValue(objRef *types.ManagedObjectReference) (*string, bool) {
+	if objRef == nil {
+		return nil, false
+	}
+	return &objRef.Value, true
+}
+
 func RegistredMetrics() {
 	prometheus.MustRegister(
 		prometheusHostPowerState,
@@ -270,7 +280,7 @@ func NewVmwareDsMetrics(host string, username string, password string, logger *l
 }
 
 // Retrieve performance metrics for VMs via a PerfManager object
-func getVmwareVmPerfMetrics(ctx context.Context, c *govmomi.Client, v *view.ContainerView, vms []mo.VirtualMachine, hss []mo.HostSystem) error {
+func getVmwareVmPerfMetrics(ctx context.Context, c *govmomi.Client, v *view.ContainerView, vms []mo.VirtualMachine, hss []mo.HostSystem, logger *log.Logger) error {
 	vmsRefs, err := v.Find(ctx, []string{"VirtualMachine"}, nil)
 	if err != nil {
 		return err
@@ -302,17 +312,41 @@ func getVmwareVmPerfMetrics(ctx context.Context, c *govmomi.Client, v *view.Cont
 		// Get the human readable vm name from the object referenced by vmRef
 		var name string
 		var vmhost string
+		metricval := &metric.Entity.Value // Perf metrics don't use pointers for their references
+
 		for _, vm := range vms {
-			if metric.Entity.Value == vm.Summary.Vm.Value {
-				name = vm.Summary.Config.Name
+			vmname := vm.Summary.Config.Name
+			vmval, ok := lookupRefValue(vm.Summary.Vm)
+			if !ok {
+				logger.Warnf("Could not lookup ManagedObjectReference for %v", vmname)
+				continue
+			}
+
+			if *metricval == *vmval {
+				name = vmname
+				vmhostval, ok := lookupRefValue(vm.Summary.Runtime.Host)
+				if !ok {
+					logger.Warnf("Could not lookup host ManagedObjectReference for %v", vmname)
+					continue
+				}
+
 				for _, host := range hss {
-					if vm.Summary.Runtime.Host.Value == host.Summary.Host.Value {
-						vmhost = host.Summary.Config.Name
+					hostname := host.Summary.Config.Name
+					hostval, ok := lookupRefValue(host.Summary.Host)
+					if !ok {
+						logger.Warnf("Could not lookup ManagedObjectReference for %v", hostname)
+					}
+
+					if *vmhostval == *hostval {
+						vmhost = hostname
 					}
 				}
 			}
 		}
 
+		if name == "" || vmhost == "" {
+			logger.Errorf("Could not resolve references for performance metric %v", metric.Entity.Type)
+		}
 		for _, v := range metric.Value {
 			if len(v.Value) != 0 {
 				prometheusVmMaxDiskLatency.WithLabelValues(name, vmhost).Set(float64(v.Value[0]))
@@ -354,15 +388,33 @@ func NewVmwareVmMetrics(host string, username string, password string, logger *l
 		// get human readable name of the hostsystem the vm is on
 		// from the actual object referenced by hostRef
 		var vmhost string
+		vmval, ok := lookupRefValue(vm.Summary.Runtime.Host)
+		if !ok {
+			logger.Warnf("Could not lookup ManagedObjectReference for %v", vmhost)
+			continue
+		}
+
 		for _, host := range hss {
-			if vm.Summary.Runtime.Host.Value == host.Summary.Host.Value {
-				vmhost = host.Summary.Config.Name
+			hostname := host.Summary.Config.Name
+			hostval, ok := lookupRefValue(vm.Summary.Runtime.Host)
+			if !ok {
+				logger.Warnf("Could not lookup ManagedObjectReference for %v", hostname)
+				continue
 			}
+
+			if *vmval == *hostval {
+				vmhost = hostname
+			}
+		}
+
+		logger.Debugf("VM: %s -- %s", vmname, vmhost)
+		if vmhost == "" {
+			logger.Warnf("Could not determine host for %v", vmname)
+			continue
 		}
 
 		ps := VirtualMachinePowerState{&vm.Summary.Runtime.PowerState}
 
-		logger.Debugf("VM: %s -- %s", vmname, vmhost)
 		prometheusVmBoot.WithLabelValues(vmname, vmhost).Set(convertTime(vm))
 		prometheusVmCpuAval.WithLabelValues(vmname, vmhost).Set(float64(vm.Summary.Runtime.MaxCpuUsage) * 1000 * 1000)
 		prometheusVmCpuUsage.WithLabelValues(vmname, vmhost).Set(float64(vm.Summary.QuickStats.OverallCpuUsage) * 1000 * 1000)
@@ -374,7 +426,7 @@ func NewVmwareVmMetrics(host string, username string, password string, logger *l
 	}
 
 	// Get VM performance metrics
-	err = getVmwareVmPerfMetrics(ctx, c, v, vms, hss)
+	err = getVmwareVmPerfMetrics(ctx, c, v, vms, hss, logger)
 	if err != nil {
 		logger.Fatal(err)
 	}
